@@ -1,0 +1,15 @@
+{
+  "name": "kratos",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "description": "Adversarial stress-tester for Base contracts. Part of the Base Agent OS.",
+  "license": "MIT",
+  "author": "Gnanam (kRATOS)",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint"
+  }
+}

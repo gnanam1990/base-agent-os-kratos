@@ -1,0 +1,35 @@
+# Node
+node_modules/
+dist/
+.turbo/
+
+# Foundry
+out/
+cache/
+broadcast/
+
+# Rust
+target/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Env + secrets
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
