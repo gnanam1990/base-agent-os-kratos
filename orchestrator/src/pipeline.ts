@@ -1,6 +1,7 @@
 import type { AuditJob, AuditReport, Finding } from '@kratos/core';
 import type { ForkHandle } from './forkPool';
 import { execa } from 'execa';
+import { aggregateFindings, generateMarkdown, uploadReport, type Report } from './reporter';
 
 export async function runStaticAnalysis(sourcePath: string): Promise<Finding[]> {
   try {
@@ -65,6 +66,25 @@ export async function runSymbolicAnalysis(sourcePath: string): Promise<Finding[]
   }
 }
 
+export async function runExploitTemplates(targetAddr: string, forkRpcUrl: string): Promise<Finding[]> {
+  try {
+    const { runAllTemplates } = await import('./exploitRunner');
+    const results = await runAllTemplates(targetAddr, forkRpcUrl);
+    return results
+      .filter(r => r.vulnerable)
+      .map(r => ({
+        tool: 'exploit-template',
+        severity: 'high' as const,
+        title: `Exploit confirmed: ${r.template}`,
+        description: `Category: ${r.category}\n${r.trace}`,
+        location: { file: `exploit-templates/test/${r.category}`, line: 0 },
+      }));
+  } catch (e) {
+    console.warn('Exploit templates failed:', e);
+    return [];
+  }
+}
+
 export async function runAudit(
   redis: any,
   fork: ForkHandle,
@@ -72,30 +92,42 @@ export async function runAudit(
 ): Promise<AuditReport> {
   console.log(`Running audit for job ${job.job_id} on fork port ${fork.port}`);
 
-  const allFindings: Finding[] = [];
-
   const staticFindings = await runStaticAnalysis(job.source);
-  allFindings.push(...staticFindings);
+
+  let fuzzFindings: Finding[] = [];
+  let symbolicFindings: Finding[] = [];
+  let exploitFindings: Finding[] = [];
 
   if (job.tier === 'standard' || job.tier === 'deep') {
-    const fuzzFindings = await runFuzzAnalysis(job.source);
-    allFindings.push(...fuzzFindings);
+    fuzzFindings = await runFuzzAnalysis(job.source);
   }
 
   if (job.tier === 'deep') {
-    const symbolicFindings = await runSymbolicAnalysis(job.source);
-    allFindings.push(...symbolicFindings);
+    symbolicFindings = await runSymbolicAnalysis(job.source);
   }
 
-  const hasCritical = allFindings.some(f => f.severity === 'critical');
-  const hasHigh = allFindings.some(f => f.severity === 'high');
-  const severity = hasCritical ? 'critical' : hasHigh ? 'high' : allFindings.length > 0 ? 'low' : 'clean';
+  exploitFindings = await runExploitTemplates(job.source, fork.rpcUrl);
+
+  const report = aggregateFindings(staticFindings, fuzzFindings, symbolicFindings, exploitFindings);
+  report.job_id = job.job_id;
+  report.target_address = job.source;
+  report.pipelines_run = ['static', 'fuzz', 'symbolic', 'exploit'].filter((_, i) => {
+    if (i === 0) return true;
+    if (i === 1) return job.tier === 'standard' || job.tier === 'deep';
+    if (i === 2) return job.tier === 'deep';
+    return true;
+  });
+
+  const markdown = generateMarkdown(report);
+  const reportUri = await uploadReport(markdown);
 
   return {
     job_id: job.job_id,
-    severity,
-    findings: allFindings,
-    report_uri: '',
-    completed_at: Math.floor(Date.now() / 1000),
+    target_address: report.target_address,
+    severity: report.severity_overall,
+    findings: report.findings,
+    report_uri: reportUri,
+    attestation_uid: '',
+    completed_at: report.completed_at,
   };
 }

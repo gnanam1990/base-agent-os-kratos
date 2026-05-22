@@ -1,0 +1,183 @@
+import type { Finding, AuditReport } from '@kratos/core';
+
+export interface Report {
+  job_id: string;
+  target_address: string;
+  severity_overall: 'clean' | 'low' | 'high' | 'critical';
+  finding_count_by_severity: {
+    clean: number;
+    low: number;
+    high: number;
+    critical: number;
+  };
+  findings: Finding[];
+  pipelines_run: string[];
+  coverage: {
+    static: boolean;
+    fuzz: boolean;
+    symbolic: boolean;
+    exploit: boolean;
+  };
+  completed_at: number;
+}
+
+const TOOL_RELIABILITY: Record<string, number> = {
+  'exploit-template': 100,
+  'slither': 90,
+  'mythril': 80,
+  '4naly3er': 70,
+  'echidna': 60,
+  'halmos': 50,
+};
+
+const SEVERITY_ORDER: Record<string, number> = {
+  'critical': 4,
+  'high': 3,
+  'medium': 2,
+  'low': 1,
+  'clean': 0,
+};
+
+export function aggregateFindings(
+  staticFindings: Finding[],
+  fuzzFindings: Finding[],
+  symbolicFindings: Finding[],
+  exploitFindings: Finding[]
+): Report {
+  const allFindings = [...staticFindings, ...fuzzFindings, ...symbolicFindings, ...exploitFindings];
+
+  const deduped = new Map<string, Finding>();
+  for (const f of allFindings) {
+    const key = `${f.title.toLowerCase()}-${f.location.file}-${f.location.line}`;
+    const existing = deduped.get(key);
+    if (!existing || SEVERITY_ORDER[f.severity] > SEVERITY_ORDER[existing.severity]) {
+      deduped.set(key, f);
+    }
+  }
+
+  const findings = Array.from(deduped.values()).sort((a, b) => {
+    const sevDiff = SEVERITY_ORDER[b.severity] - SEVERITY_ORDER[a.severity];
+    if (sevDiff !== 0) return sevDiff;
+    return (TOOL_RELIABILITY[b.tool] || 0) - (TOOL_RELIABILITY[a.tool] || 0);
+  });
+
+  const countBySeverity = { clean: 0, low: 0, high: 0, critical: 0 };
+  for (const f of findings) {
+    if (f.severity in countBySeverity) {
+      countBySeverity[f.severity as keyof typeof countBySeverity]++;
+    }
+  }
+
+  const severityOverall = countBySeverity.critical > 0 ? 'critical'
+    : countBySeverity.high > 0 ? 'high'
+    : countBySeverity.low > 0 ? 'low'
+    : 'clean';
+
+  return {
+    job_id: '',
+    target_address: '',
+    severity_overall: severityOverall,
+    finding_count_by_severity: countBySeverity,
+    findings,
+    pipelines_run: [],
+    coverage: {
+      static: staticFindings.length > 0,
+      fuzz: fuzzFindings.length > 0,
+      symbolic: symbolicFindings.length > 0,
+      exploit: exploitFindings.length > 0,
+    },
+    completed_at: Math.floor(Date.now() / 1000),
+  };
+}
+
+export function generateMarkdown(report: Report): string {
+  const lines: string[] = [];
+
+  lines.push('# Kratos Audit Report');
+  lines.push('');
+  lines.push(`**Target:** \`${report.target_address}\``);
+  lines.push(`**Overall Severity:** ${report.severity_overall.toUpperCase()}`);
+  lines.push(`**Findings:** ${report.findings.length}`);
+  lines.push(`**Completed:** ${new Date(report.completed_at * 1000).toISOString()}`);
+  lines.push('');
+
+  lines.push('## Executive Summary');
+  lines.push('');
+  lines.push(`| Severity | Count |`);
+  lines.push(`|----------|-------|`);
+  lines.push(`| Critical | ${report.finding_count_by_severity.critical} |`);
+  lines.push(`| High | ${report.finding_count_by_severity.high} |`);
+  lines.push(`| Low | ${report.finding_count_by_severity.low} |`);
+  lines.push(`| Clean | ${report.finding_count_by_severity.clean} |`);
+  lines.push('');
+
+  if (report.findings.length > 0) {
+    lines.push('## Findings');
+    lines.push('');
+    for (let i = 0; i < report.findings.length; i++) {
+      const f = report.findings[i];
+      lines.push(`### ${i + 1}. ${f.title}`);
+      lines.push('');
+      lines.push(`**Severity:** ${f.severity}`);
+      lines.push(`**Tool:** ${f.tool}`);
+      lines.push(`**Location:** \`${f.location.file}:${f.location.line}\``);
+      lines.push('');
+      lines.push(f.description);
+      lines.push('');
+      if (f.remediation) {
+        lines.push(`**Remediation:** ${f.remediation}`);
+        lines.push('');
+      }
+    }
+  }
+
+  lines.push('## Coverage');
+  lines.push('');
+  lines.push(`- Static Analysis: ${report.coverage.static ? 'Yes' : 'No'}`);
+  lines.push(`- Fuzzing: ${report.coverage.fuzz ? 'Yes' : 'No'}`);
+  lines.push(`- Symbolic Execution: ${report.coverage.symbolic ? 'Yes' : 'No'}`);
+  lines.push(`- Exploit Templates: ${report.coverage.exploit ? 'Yes' : 'No'}`);
+  lines.push('');
+
+  lines.push('## Disclaimer');
+  lines.push('');
+  lines.push('> **This audit was performed by an automated agent (Kratos) and is NOT a substitute for professional human auditing.**');
+  lines.push('> Automated tools may miss vulnerabilities, produce false positives, or fail to capture complex business logic flaws.');
+  lines.push('> For production deployments, always engage a professional security audit firm.');
+  lines.push('> Kratos provides a first-pass automated analysis to identify common vulnerability patterns.');
+  lines.push('');
+
+  lines.push('---');
+  lines.push('');
+  lines.push('*Generated by [Kratos](https://github.com/gnanam1990/kratos) - Adversarial Stress-Testing Agent*');
+
+  return lines.join('\n');
+}
+
+export async function uploadReport(markdown: string): Promise<string> {
+  const pinataJwt = process.env.PINATA_JWT;
+
+  if (!pinataJwt) {
+    console.warn('PINATA_JWT not set, returning placeholder URI');
+    return `ipfs://placeholder-${Date.now()}`;
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append('file', new Blob([markdown], { type: 'text/markdown' }), 'report.md');
+
+    const res = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${pinataJwt}`,
+      },
+      body: formData,
+    });
+
+    const data = await res.json() as any;
+    return `ipfs://${data.IpfsHash}`;
+  } catch (e) {
+    console.warn('IPFS upload failed:', e);
+    return `ipfs://error-${Date.now()}`;
+  }
+}
