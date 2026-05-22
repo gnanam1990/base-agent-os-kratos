@@ -1,0 +1,13 @@
+{
+  "base-mainnet": {
+    "chainId": 8453,
+    "KratosRegistry": {
+      "address": "0xPLACEHOLDER",
+      "txHash": "0xPLACEHOLDER",
+      "blockNumber": 0,
+      "deployer": "0xPLACEHOLDER",
+      "agent": "0xPLACEHOLDER",
+      "basescan": "https://basescan.org/address/0xPLACEHOLDER#code"
+    }
+  }
+}

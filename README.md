@@ -11,7 +11,7 @@ To be filled in after Stage 09 (or equivalent).
 
 ## On-chain
 
-To be filled in after Stage 04.
+- **KratosRegistry** - [0xPLACEHOLDER](https://basescan.org/address/0xPLACEHOLDER#code) (pending deployment)
 
 ## Part of the Base Agent OS
 
