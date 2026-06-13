@@ -5,9 +5,13 @@ import { aggregateFindings, generateMarkdown, uploadReport, type Report } from '
 
 export async function runStaticAnalysis(sourcePath: string): Promise<Finding[]> {
   try {
+    // The source path is passed as an argv argument (sys.argv[1]) rather than
+    // interpolated into the -c program string, so attacker-controlled job.source
+    // values cannot break out of the Python literal and execute arbitrary code.
     const result = await execa('python3', [
       '-c',
-      `import asyncio, json; from pipelines.static import run_static_pipeline; from pathlib import Path; print(json.dumps([f.model_dump() for f in asyncio.run(run_static_pipeline(Path('${sourcePath}')))], default=str))`
+      'import sys, asyncio, json; from pipelines.static import run_static_pipeline; from pathlib import Path; print(json.dumps([f.model_dump() for f in asyncio.run(run_static_pipeline(Path(sys.argv[1])))], default=str))',
+      sourcePath,
     ], { cwd: process.cwd() });
 
     const findings = JSON.parse(result.stdout);
@@ -28,7 +32,8 @@ export async function runFuzzAnalysis(sourcePath: string): Promise<Finding[]> {
   try {
     const result = await execa('python3', [
       '-c',
-      `import asyncio, json; from pipelines.fuzz import run_fuzz_pipeline; from pathlib import Path; print(json.dumps([f.model_dump() for f in asyncio.run(run_fuzz_pipeline(Path('${sourcePath}')))], default=str))`
+      'import sys, asyncio, json; from pipelines.fuzz import run_fuzz_pipeline; from pathlib import Path; print(json.dumps([f.model_dump() for f in asyncio.run(run_fuzz_pipeline(Path(sys.argv[1])))], default=str))',
+      sourcePath,
     ], { cwd: process.cwd() });
 
     const findings = JSON.parse(result.stdout);
@@ -49,7 +54,8 @@ export async function runSymbolicAnalysis(sourcePath: string): Promise<Finding[]
   try {
     const result = await execa('python3', [
       '-c',
-      `import asyncio, json; from pipelines.symbolic import run_symbolic_pipeline; from pathlib import Path; print(json.dumps([f.model_dump() for f in asyncio.run(run_symbolic_pipeline(Path('${sourcePath}')))], default=str))`
+      'import sys, asyncio, json; from pipelines.symbolic import run_symbolic_pipeline; from pathlib import Path; print(json.dumps([f.model_dump() for f in asyncio.run(run_symbolic_pipeline(Path(sys.argv[1])))], default=str))',
+      sourcePath,
     ], { cwd: process.cwd() });
 
     const findings = JSON.parse(result.stdout);

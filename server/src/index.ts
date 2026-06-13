@@ -1,21 +1,32 @@
 import 'dotenv/config';
 import { Hono } from 'hono';
 import { paymentMiddleware } from 'x402-hono';
+import { facilitator } from '@coinbase/x402';
 import { createClient } from 'redis';
 import { randomUUID } from 'crypto';
 
 const app = new Hono();
 
-const payeeAddress = process.env.AGENT_WALLET as `0x${string}`;
+const payeeAddress = process.env.AGENT_WALLET as `0x${string}` | undefined;
+if (!payeeAddress) {
+  // Fail closed: without a payee the x402 middleware cannot gate paid routes,
+  // which would expose the $50-$1000 endpoints for free.
+  throw new Error('AGENT_WALLET is required to configure x402 payment gating');
+}
 
+// Coinbase CDP facilitator. Requires CDP_API_KEY_ID and CDP_API_KEY_SECRET in the
+// environment to verify/settle real payments on Base mainnet. Omitting this (or the
+// `network: 'base'` below) makes x402 default to the base-sepolia testnet facilitator,
+// which would let callers pay with worthless testnet USDC.
 app.use('*', paymentMiddleware(
   payeeAddress,
   {
-    '/api/scan/fast': '$50',
-    '/api/scan/standard': '$200',
-    '/api/scan/deep': '$500',
-    '/api/monitor': '$1000',
-  }
+    '/api/scan/fast': { price: '$50', network: 'base' },
+    '/api/scan/standard': { price: '$200', network: 'base' },
+    '/api/scan/deep': { price: '$500', network: 'base' },
+    '/api/monitor': { price: '$1000', network: 'base' },
+  },
+  facilitator,
 ));
 
 app.get('/health', (c) => {
